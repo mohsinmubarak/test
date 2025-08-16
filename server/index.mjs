@@ -9,6 +9,11 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8787;
 const ENABLE_AUTOMATION = String(process.env.ENABLE_AUTOMATION || '').toLowerCase() === 'true';
+const HUMANIZE = String(process.env.HUMANIZE || 'true').toLowerCase() !== 'false';
+const TIMEZONE = process.env.TIMEZONE || 'UTC';
+const LOCALE = process.env.LOCALE || 'en-US';
+const STORAGE_STATE_PATH = process.env.STORAGE_STATE_PATH || '';
+const PLAYWRIGHT_PROXY = process.env.PLAYWRIGHT_PROXY || '';
 
 const limiter = rateLimit({
 	windowMs: 60 * 1000,
@@ -25,6 +30,73 @@ function isValidUrl(candidate) {
 	} catch {
 		return false;
 	}
+}
+
+// Human-like utilities
+function randomInt(min, max) {
+	return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function pickRandom(arr) {
+	return arr[Math.floor(Math.random() * arr.length)];
+}
+
+async function sleep(ms) {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function randomUserAgent() {
+	const userAgents = [
+		'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+		'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15',
+		'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+		'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0'
+	];
+	return pickRandom(userAgents);
+}
+
+function randomViewport() {
+	return {
+		width: randomInt(1280, 1920),
+		height: randomInt(720, 1080),
+		deviceScaleFactor: pickRandom([1, 1.25, 1.5, 2]),
+		colorScheme: pickRandom(['light', 'dark'])
+	};
+}
+
+async function humanizeNavigation(page) {
+	if (!HUMANIZE) return;
+	// Small random pause before interacting
+	await sleep(randomInt(800, 2000));
+	// Random mouse move
+	const vp = await page.viewportSize();
+	if (vp) {
+		const moves = randomInt(2, 5);
+		for (let i = 0; i < moves; i++) {
+			await page.mouse.move(randomInt(0, vp.width), randomInt(0, vp.height), { steps: randomInt(8, 20) });
+			await sleep(randomInt(100, 300));
+		}
+	}
+	// Scroll down in small chunks
+	for (let i = 0; i < randomInt(2, 5); i++) {
+		const delta = randomInt(300, 700);
+		await page.evaluate((d) => window.scrollBy(0, d), delta);
+		await sleep(randomInt(200, 700));
+	}
+	// Scroll back slightly
+	await page.evaluate((d) => window.scrollBy(0, -d), randomInt(100, 300));
+	await sleep(randomInt(200, 500));
+}
+
+async function moveMouseToLocator(page, locator) {
+	const box = await locator.boundingBox().catch(() => null);
+	if (!box) return;
+	const targetX = box.x + box.width / 2 + randomInt(-5, 5);
+	const targetY = box.y + box.height / 2 + randomInt(-5, 5);
+	await page.mouse.move(targetX + randomInt(-30, 30), targetY + randomInt(-30, 30), { steps: randomInt(10, 25) });
+	await sleep(randomInt(80, 200));
+	await page.mouse.move(targetX, targetY, { steps: randomInt(8, 18) });
+	await sleep(randomInt(120, 300));
 }
 
 // Simple LangChain-like tool interface for scraping
@@ -151,15 +223,33 @@ app.post('/api/product/automate', async (req, res) => {
 	let browser;
 	try {
 		const { chromium } = await import('playwright');
-		browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu'] });
-		const context = await browser.newContext({
-			viewport: { width: 1280, height: 800 },
-			userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit(537.36) Chrome/122 Safari/537.36',
-			locale: 'en-US',
-			timezoneId: 'UTC'
-		});
+		const launchOptions = {
+			headless: true,
+			args: ['--no-sandbox', '--disable-gpu', '--disable-blink-features=AutomationControlled']
+		};
+		if (PLAYWRIGHT_PROXY) {
+			launchOptions.proxy = { server: PLAYWRIGHT_PROXY };
+		}
+		browser = await chromium.launch(launchOptions);
+
+		const vp = randomViewport();
+		const contextOptions = {
+			viewport: { width: vp.width, height: vp.height },
+			deviceScaleFactor: vp.deviceScaleFactor,
+			userAgent: randomUserAgent(),
+			locale: LOCALE,
+			timezoneId: TIMEZONE,
+			colorScheme: vp.colorScheme,
+			extraHTTPHeaders: { 'Accept-Language': `${LOCALE},en;q=0.9` }
+		};
+		if (STORAGE_STATE_PATH) {
+			contextOptions.storageState = STORAGE_STATE_PATH;
+		}
+		const context = await browser.newContext(contextOptions);
 		const page = await context.newPage();
+
 		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+		await humanizeNavigation(page);
 
 		const marketplace = detectMarketplace(url);
 		let message = 'Opened product page';
@@ -168,9 +258,13 @@ app.post('/api/product/automate', async (req, res) => {
 			if (marketplace === 'amazon') {
 				const addToCart = page.locator('#add-to-cart-button');
 				if (await addToCart.count()) {
-					await addToCart.first().click({ timeout: 15000 });
+					await addToCart.scrollIntoViewIfNeeded().catch(() => {});
+					await moveMouseToLocator(page, addToCart);
+					await sleep(randomInt(180, 600));
+					await addToCart.first().click({ timeout: 15000, trial: false });
 					message = 'Attempted to add to cart on Amazon';
-					await page.waitForTimeout(2000);
+					await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+					await sleep(randomInt(600, 1400));
 				} else {
 					message = 'Add to Cart button not found on Amazon';
 				}
@@ -179,12 +273,17 @@ app.post('/api/product/automate', async (req, res) => {
 				const closeBtn = page.locator('button[title="Close"]');
 				if (await closeBtn.count()) {
 					await closeBtn.first().click().catch(() => {});
+					await sleep(randomInt(200, 600));
 				}
 				const addToCart = page.getByText('Add to cart', { exact: false });
 				if (await addToCart.count()) {
-					await addToCart.first().click({ timeout: 15000 });
+					await addToCart.scrollIntoViewIfNeeded().catch(() => {});
+					await moveMouseToLocator(page, addToCart);
+					await sleep(randomInt(180, 600));
+					await addToCart.first().click({ timeout: 15000, trial: false });
 					message = 'Attempted to add to cart on Flipkart';
-					await page.waitForTimeout(2000);
+					await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+					await sleep(randomInt(600, 1400));
 				} else {
 					message = 'Add to Cart button not found on Flipkart';
 				}
@@ -193,6 +292,9 @@ app.post('/api/product/automate', async (req, res) => {
 			}
 		}
 
+		if (STORAGE_STATE_PATH) {
+			try { await context.storageState({ path: STORAGE_STATE_PATH }); } catch {}
+		}
 		const screenshot = await page.screenshot({ fullPage: true });
 		await browser.close();
 		browser = null;
