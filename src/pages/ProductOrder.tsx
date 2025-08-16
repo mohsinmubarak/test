@@ -7,6 +7,8 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { Textarea } from '@/components/ui/textarea';
 import { automateProduct } from '@/services/automationApi';
 
+const ENABLE_AUTOMATION = String(import.meta.env.VITE_ENABLE_AUTOMATION || '').toLowerCase() === 'true';
+
 const ProductOrder: React.FC = () => {
 	const [url, setUrl] = useState('');
 	const [loading, setLoading] = useState(false);
@@ -76,10 +78,12 @@ const ProductOrder: React.FC = () => {
 							<div className="flex gap-2">
 								<Input id="url" placeholder="https://www.amazon.in/... or https://www.flipkart.com/..." value={url} onChange={(e) => setUrl(e.target.value)} />
 								<Button disabled={loading || !url} onClick={handleFetch}>{loading ? 'Fetching...' : 'Fetch details'}</Button>
-								<Button variant="secondary" disabled={autoBusy || !url} onClick={handleAutomate}>{autoBusy ? 'Automating...' : 'Try Add to Cart'}</Button>
+								{ENABLE_AUTOMATION && (
+									<Button variant="secondary" disabled={autoBusy || !url} onClick={handleAutomate}>{autoBusy ? 'Automating...' : 'Try Add to Cart'}</Button>
+								)}
 							</div>
 							{error && <p className="text-sm text-red-600">{error}</p>}
-							{autoMsg && <p className="text-sm text-gray-700">{autoMsg}</p>}
+							{autoMsg && ENABLE_AUTOMATION && <p className="text-sm text-gray-700">{autoMsg}</p>}
 						</CardContent>
 					</Card>
 
@@ -106,7 +110,7 @@ const ProductOrder: React.FC = () => {
 						</Card>
 					)}
 
-					{(screenshot) && (
+					{(screenshot && ENABLE_AUTOMATION) && (
 						<Card>
 							<CardHeader>
 								<CardTitle>Automation Screenshot</CardTitle>

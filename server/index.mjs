@@ -1,12 +1,22 @@
 import express from 'express';
 import cors from 'cors';
 import { load as loadHtml } from 'cheerio';
+import rateLimit from 'express-rate-limit';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8787;
+const ENABLE_AUTOMATION = String(process.env.ENABLE_AUTOMATION || '').toLowerCase() === 'true';
+
+const limiter = rateLimit({
+	windowMs: 60 * 1000,
+	max: 15,
+	standardHeaders: true,
+	legacyHeaders: false,
+});
+app.use('/api/', limiter);
 
 function isValidUrl(candidate) {
 	try {
@@ -131,6 +141,9 @@ app.post('/api/product/details', async (req, res) => {
 });
 
 app.post('/api/product/automate', async (req, res) => {
+	if (!ENABLE_AUTOMATION) {
+		return res.status(403).json({ error: 'Automation disabled. Set ENABLE_AUTOMATION=true to enable.' });
+	}
 	const { url, action = 'addToCart' } = req.body || {};
 	if (!url || !isValidUrl(url)) {
 		return res.status(400).json({ error: 'Please provide a valid product URL as "url".' });
@@ -141,7 +154,9 @@ app.post('/api/product/automate', async (req, res) => {
 		browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu'] });
 		const context = await browser.newContext({
 			viewport: { width: 1280, height: 800 },
-			userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+			userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit(537.36) Chrome/122 Safari/537.36',
+			locale: 'en-US',
+			timezoneId: 'UTC'
 		});
 		const page = await context.newPage();
 		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
