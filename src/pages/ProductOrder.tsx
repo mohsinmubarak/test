@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { automateProduct } from '@/services/automationApi';
 
 const ProductOrder: React.FC = () => {
 	const [url, setUrl] = useState('');
@@ -19,6 +20,10 @@ const ProductOrder: React.FC = () => {
 	const [quantity, setQuantity] = useState(1);
 	const [payment, setPayment] = useState<'COD' | 'UPI' | 'CARD'>('COD');
 
+	const [autoBusy, setAutoBusy] = useState(false);
+	const [autoMsg, setAutoMsg] = useState<string | null>(null);
+	const [screenshot, setScreenshot] = useState<string | null>(null);
+
 	const handleFetch = async () => {
 		setError(null);
 		setLoading(true);
@@ -29,6 +34,21 @@ const ProductOrder: React.FC = () => {
 			setError(e?.message || 'Failed to fetch');
 		} finally {
 			setLoading(false);
+		}
+	};
+
+	const handleAutomate = async () => {
+		setAutoBusy(true);
+		setAutoMsg(null);
+		setScreenshot(null);
+		try {
+			const res = await automateProduct(url, 'addToCart');
+			setAutoMsg(res.message);
+			setScreenshot(`data:image/png;base64,${res.screenshotBase64}`);
+		} catch (e: any) {
+			setAutoMsg(e?.message || 'Automation failed');
+		} finally {
+			setAutoBusy(false);
 		}
 	};
 
@@ -56,8 +76,10 @@ const ProductOrder: React.FC = () => {
 							<div className="flex gap-2">
 								<Input id="url" placeholder="https://www.amazon.in/... or https://www.flipkart.com/..." value={url} onChange={(e) => setUrl(e.target.value)} />
 								<Button disabled={loading || !url} onClick={handleFetch}>{loading ? 'Fetching...' : 'Fetch details'}</Button>
+								<Button variant="secondary" disabled={autoBusy || !url} onClick={handleAutomate}>{autoBusy ? 'Automating...' : 'Try Add to Cart'}</Button>
 							</div>
 							{error && <p className="text-sm text-red-600">{error}</p>}
+							{autoMsg && <p className="text-sm text-gray-700">{autoMsg}</p>}
 						</CardContent>
 					</Card>
 
@@ -80,6 +102,17 @@ const ProductOrder: React.FC = () => {
 									<div className="text-sm text-gray-600">Rating: {product.rating || '—'}</div>
 									<div className="text-xs text-gray-500">Marketplace: {product.marketplace}</div>
 								</div>
+							</CardContent>
+						</Card>
+					)}
+
+					{(screenshot) && (
+						<Card>
+							<CardHeader>
+								<CardTitle>Automation Screenshot</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<img src={screenshot} alt="automation" className="rounded border" />
 							</CardContent>
 						</Card>
 					)}

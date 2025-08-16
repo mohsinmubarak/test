@@ -130,6 +130,67 @@ app.post('/api/product/details', async (req, res) => {
 	}
 });
 
+app.post('/api/product/automate', async (req, res) => {
+	const { url, action = 'addToCart' } = req.body || {};
+	if (!url || !isValidUrl(url)) {
+		return res.status(400).json({ error: 'Please provide a valid product URL as "url".' });
+	}
+	let browser;
+	try {
+		const { chromium } = await import('playwright');
+		browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-gpu'] });
+		const context = await browser.newContext({
+			viewport: { width: 1280, height: 800 },
+			userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+		});
+		const page = await context.newPage();
+		await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+		const marketplace = detectMarketplace(url);
+		let message = 'Opened product page';
+
+		if (action === 'addToCart') {
+			if (marketplace === 'amazon') {
+				const addToCart = page.locator('#add-to-cart-button');
+				if (await addToCart.count()) {
+					await addToCart.first().click({ timeout: 15000 });
+					message = 'Attempted to add to cart on Amazon';
+					await page.waitForTimeout(2000);
+				} else {
+					message = 'Add to Cart button not found on Amazon';
+				}
+			} else if (marketplace === 'flipkart') {
+				// Close login popup if present
+				const closeBtn = page.locator('button[title="Close"]');
+				if (await closeBtn.count()) {
+					await closeBtn.first().click().catch(() => {});
+				}
+				const addToCart = page.getByText('Add to cart', { exact: false });
+				if (await addToCart.count()) {
+					await addToCart.first().click({ timeout: 15000 });
+					message = 'Attempted to add to cart on Flipkart';
+					await page.waitForTimeout(2000);
+				} else {
+					message = 'Add to Cart button not found on Flipkart';
+				}
+			} else {
+				message = 'Unknown marketplace; opened page only';
+			}
+		}
+
+		const screenshot = await page.screenshot({ fullPage: true });
+		await browser.close();
+		browser = null;
+		return res.json({ success: true, message, screenshotBase64: Buffer.from(screenshot).toString('base64') });
+	} catch (err) {
+		console.error(err);
+		if (browser) {
+			try { await browser.close(); } catch {}
+		}
+		return res.status(500).json({ error: err?.message || 'Automation failed' });
+	}
+});
+
 app.listen(PORT, () => {
 	console.log(`[server] listening on http://localhost:${PORT}`);
 });
