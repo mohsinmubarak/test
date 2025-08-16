@@ -2,6 +2,7 @@
 import React from 'react';
 import { MessageCircle } from 'lucide-react';
 import { AIQueryEngine } from '@/components/AIQueryEngine';
+import { Link } from 'react-router-dom';
 
 const Index = () => {
   return (
@@ -17,8 +18,11 @@ const Index = () => {
               e-delivery <span className="font-light">AI Agent</span>
             </h1>
           </div>
-          <div className="text-sm text-edelivery-blue">
-            Powered by MIGSO-PCUBED
+          <div className="flex items-center gap-4">
+            <Link className="text-sm text-edelivery-blue underline" to="/order">Product Order</Link>
+            <div className="text-sm text-edelivery-blue">
+              Powered by MIGSO-PCUBED
+            </div>
           </div>
         </div>
       </header>
